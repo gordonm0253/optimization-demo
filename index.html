@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Optimizer Visualization — CS 4782</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <span class="course-badge">CS 4782</span>
+    <h1>Gradient Descent Optimizer Visualization</h1>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:var(--sgd)"></div>SGD</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--mom)"></div>Momentum</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--adam)"></div>Adam</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--start)"></div>Start</div>
+    <div class="legend-item"><div class="legend-dot" style="background:var(--min)"></div>Global Minimum</div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="canvas-area">
+    <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
+    <div id="three-container">
+      <div class="drag-hint" id="dragHint">🖱 Drag to orbit &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Right-drag to pan</div>
+    </div>
+    <div class="loss-panel">
+      <div class="loss-label">Loss curve — step <span id="stepLabel">0</span> / <span id="maxStepLabel">320</span></div>
+      <canvas id="c2d"></canvas>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="section-label">Start position</div>
+      <div class="preset-grid">
+        <button class="preset-btn active" id="preA">Rocky ridge <span class="preset-sub">long SGD path</span></button>
+        <button class="preset-btn" id="preB">Opposite ridge <span class="preset-sub">momentum</span></button>
+        <button class="preset-btn" id="preC">Ravine mouth <span class="preset-sub">zig-zag</span></button>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Hyperparameters</div>
+      <div class="slider-group">
+        <div class="slider-header"><span class="slider-name">Learning rate α</span><span class="slider-val" id="lrVal">0.05</span></div>
+        <input type="range" id="lrSlider" min="1" max="20" value="5" step="1">
+        <div class="slider-ticks"><span>0.01</span><span>0.10</span><span>0.20</span></div>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header"><span class="slider-name">Momentum β</span><span class="slider-val" id="momVal">0.90</span></div>
+        <input type="range" id="momSlider" min="0" max="95" value="90" step="5">
+        <div class="slider-ticks"><span>0</span><span>0.50</span><span>0.95</span></div>
+      </div>
+      <div class="slider-group" style="margin-bottom:0">
+        <div class="slider-header"><span class="slider-name">Sim speed</span><span class="slider-val" id="speedVal">0.5×</span></div>
+        <input type="range" id="speedSlider" min="1" max="6" value="3" step="1">
+        <div class="slider-ticks"><span>slow</span><span>1×</span><span>2×</span></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Optimizers</div>
+      <div class="optimizer-toggles">
+        <label class="opt-toggle checked" id="togSGD">
+          <input type="checkbox" checked>
+          <div class="opt-check" style="background:var(--sgd)">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <span class="opt-name">SGD</span>
+          <span class="opt-loss" id="lossSGD">—</span>
+        </label>
+        <label class="opt-toggle checked" id="togMOM">
+          <input type="checkbox" checked>
+          <div class="opt-check" style="background:var(--mom)">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <span class="opt-name">SGD + Momentum</span>
+          <span class="opt-loss" id="lossMOM">—</span>
+        </label>
+        <label class="opt-toggle checked" id="togADAM">
+          <input type="checkbox" checked>
+          <div class="opt-check" style="background:var(--adam)">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <span class="opt-name">Adam</span>
+          <span class="opt-loss" id="lossADAM">—</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <button class="run-btn" id="runBtn">▶  RUN</button>
+      <button class="reset-btn" id="resetBtn">Reset</button>
+      <div class="step-counter" id="stepCounter">step 0 / 320</div>
+    </div>
+
+    <div class="insight-box" id="insightBox">
+      Choose a <strong>start position</strong>, press <strong>Run</strong>, then compare the bright 3D traces and the loss curves.
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
