@@ -1,29 +1,83 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 const STEPS  = 320;
 const SURF_N = 72;
-const TUBE_SEGMENTS_PER_STEP = 4;
 const TUBE_RADIAL_SEGMENTS = 10;
 const COLORS_HEX = { sgd:'#ff4fd8', mom:'#00d4ff', adam:'#7cff4f' };
 const COLORS_NUM  = { sgd:0xff4fd8, mom:0x00d4ff, adam:0x7cff4f };
 const TRACE_RADIUS = { sgd:0.033, mom:0.041, adam:0.036 };
 const TRACE_OPACITY = { sgd:1.0, mom:1.0, adam:1.0 };
 const NAMES       = { sgd:'SGD', mom:'SGD + Momentum', adam:'Adam' };
+const DOMAIN = { xMin:-4.0, xMax:4.0, yMin:-2.5, yMax:2.5 };
+const MAX_OPTIMIZER_STEP = 0.22;
 
-// ── Loss function ─────────────────────────────────────────────────────────────
-// A long, rocky ravine: the valley floor winds toward the global minimum at (0,0).
-// The squared ripple terms make the surface visually rugged without moving the true minimum.
-function valleyY(x) { return 0.55 * Math.sin(1.25 * x); }
-function loss(x, y) {
-  const r = y - valleyY(x);
-  const radial = x*x + y*y;
-  const rocks1 = Math.sin(3.2*x) * Math.sin(2.6*y);
-  const rocks2 = Math.sin(6.0*x + 1.7*y) * Math.cos(4.2*y);
-  return 0.13*x*x + 3.2*r*r + 0.030*radial*rocks1*rocks1 + 0.012*radial*rocks2*rocks2;
-}
-// Numerical gradients keep the demo easy to modify: edit loss(), and the optimizers still follow it.
+// ── Loss landscapes ──────────────────────────────────────────────────────────
+function ravineY(x) { return 0.55 * Math.sin(1.25 * x); }
+
+const LANDSCAPES = {
+  ravine: {
+    label: 'Winding ravine',
+    min: {x:0, y:0},
+    lossMax: 42,
+    defaults: { lr:8, beta:90 },
+    lrScale: { sgd:1.0, mom:0.72, adam:1.45 },
+    starts: {
+      A:{label:'Rocky ridge', x:3.65, y:1.75},
+      B:{label:'Opposite ridge', x:-3.45, y:-1.55},
+      C:{label:'Ravine mouth', x:3.2, y:0.05}
+    },
+    loss(x, y) {
+      const r = y - ravineY(x);
+      const radial = x*x + y*y;
+      const rocks1 = Math.sin(3.2*x) * Math.sin(2.6*y);
+      const rocks2 = Math.sin(6.0*x + 1.7*y) * Math.cos(4.2*y);
+      return 0.13*x*x + 3.2*r*r + 0.030*radial*rocks1*rocks1 + 0.012*radial*rocks2*rocks2;
+    }
+  },
+  bowl: {
+    label: 'Tilted bowl',
+    min: {x:0, y:0},
+    lossMax: 28,
+    defaults: { lr:10, beta:85 },
+    lrScale: { sgd:1.0, mom:1.0, adam:1.2 },
+    starts: {
+      A:{label:'Wide side', x:3.5, y:1.9},
+      B:{label:'Steep wall', x:-3.2, y:2.1},
+      C:{label:'Near floor', x:1.6, y:-0.9}
+    },
+    loss(x, y) {
+      const u = 0.78*x + 0.63*y;
+      const v = -0.63*x + 0.78*y;
+      return 0.28*u*u + 2.35*v*v;
+    }
+  },
+  ripples: {
+    label: 'Rippled basin',
+    min: {x:0, y:0},
+    lossMax: 34,
+    defaults: { lr:6, beta:80 },
+    lrScale: { sgd:0.9, mom:0.85, adam:1.05 },
+    starts: {
+      A:{label:'Outer ring', x:3.55, y:-1.7},
+      B:{label:'Side basin', x:-3.2, y:1.85},
+      C:{label:'Noisy saddle', x:0.4, y:2.15}
+    },
+    loss(x, y) {
+      const radial = x*x + y*y;
+      const ripple = Math.sin(3.8*x) * Math.sin(3.2*y);
+      const ring = Math.sin(2.4 * Math.sqrt(radial + 0.01));
+      return 0.18*radial + 0.055*radial*ripple*ripple + 0.040*radial*ring*ring;
+    }
+  }
+};
+
+let activeLandscapeKey = 'ravine';
+let LOSS_MAX = LANDSCAPES[activeLandscapeKey].lossMax;
+
+function activeLandscape() { return LANDSCAPES[activeLandscapeKey]; }
+function loss(x, y) { return activeLandscape().loss(x, y); }
+// Numerical gradients keep the demo easy to modify: edit a landscape loss(), and the optimizers still follow it.
 function gradX(x,y) { const h = 1e-4; return (loss(x+h,y)-loss(x-h,y))/(2*h); }
 function gradY(x,y) { const h = 1e-4; return (loss(x,y+h)-loss(x,y-h))/(2*h); }
-const LOSS_MAX = 42;
 function clampL(l) { return Math.min(l, LOSS_MAX); }
 
 // World→Three: (wx, wy, loss) → Vector3. Loss goes up (y axis).
@@ -32,8 +86,8 @@ function w2v(wx, wy, l) {
 }
 
 // ── Presets ───────────────────────────────────────────────────────────────────
-const PRESETS = { A:{x:3.65,y:1.75}, B:{x:-3.45,y:-1.55}, C:{x:3.2,y:0.05} };
-let startPos = {...PRESETS.A};
+let startKey = 'A';
+let startPos = {...activeLandscape().starts[startKey]};
 let paths = {}, step = 0, animProgress = 0, isRunning = false, animFrame = null, lastTickTime = 0, lastUiStep = -1;
 
 // ── Three.js ──────────────────────────────────────────────────────────────────
@@ -157,7 +211,8 @@ function buildSurface() {
 
   for (let i = 0; i <= N; i++) {
     for (let j = 0; j <= N; j++) {
-      const wx = -4.0 + 8*i/N, wy = -2.5 + 5*j/N;
+      const wx = DOMAIN.xMin + (DOMAIN.xMax - DOMAIN.xMin)*i/N;
+      const wy = DOMAIN.yMin + (DOMAIN.yMax - DOMAIN.yMin)*j/N;
       const l = clampL(loss(wx, wy));
       const v = w2v(wx, wy, l);
       pos.push(v.x, v.y, v.z);
@@ -192,7 +247,12 @@ function buildSurface() {
 
 // ── Path objects ──────────────────────────────────────────────────────────────
 let pathObjs = { sgd:[], mom:[], adam:[] };
+let pathVisuals = {};
 let markerObjs = [];
+const segmentMatrix = new THREE.Matrix4();
+const segmentPosition = new THREE.Vector3();
+const segmentScale = new THREE.Vector3();
+const shadowEnd = new THREE.Vector3();
 
 function clearScene3D() {
   ['sgd','mom','adam'].forEach(k => {
@@ -209,6 +269,7 @@ function clearScene3D() {
     if(o.material) { if(o.material.map) o.material.map.dispose(); o.material.dispose(); }
   });
   markerObjs = [];
+  pathVisuals = {};
 }
 
 function makeDot(pos, color, size=8) {
@@ -297,24 +358,87 @@ function makeBeacon(pos, color) {
   return group;
 }
 
-function makeTube(points, color, radius=0.035, opacity=1.0) {
-  if (points.length < 2) return null;
-  const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.25);
-  const geo = new THREE.TubeGeometry(curve, Math.max(8, points.length * 2), radius, 10, false);
-  const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.25, metalness: 0.05, transparent:true, opacity });
-  const tube = new THREE.Mesh(geo, mat);
-  scene.add(tube);
-  return tube;
+function makeTubeInstances(points, color, radius=0.035, opacity=1.0) {
+  const count = Math.max(0, points.length - 1);
+  const geo = new THREE.CylinderGeometry(radius, radius, 1, TUBE_RADIAL_SEGMENTS, 1, false);
+  const mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.15, roughness: 0.22, metalness: 0.05, transparent:true, opacity });
+  const mesh = new THREE.InstancedMesh(geo, mat, count);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+  const segments = [];
+  for (let i=0; i<count; i++) {
+    const delta = new THREE.Vector3().subVectors(points[i+1], points[i]);
+    const length = delta.length();
+    const dir = length > 1e-6 ? delta.clone().normalize() : new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    segments.push({ start: points[i].clone(), dir, length, quat });
+    segmentMatrix.makeScale(0, 0, 0);
+    mesh.setMatrixAt(i, segmentMatrix);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  scene.add(mesh);
+  return { mesh, segments };
 }
 
-function makeShadowLine(points, color) {
-  if (points.length < 2) return null;
+function makeShadowPath(points, color) {
   const floorPts = points.map(p => new THREE.Vector3(p.x, 0.012, p.z));
-  const geo = new THREE.BufferGeometry().setFromPoints(floorPts);
+  const positions = new Float32Array(floorPts.length * 3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setDrawRange(0, 0);
   const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.32 });
   const line = new THREE.Line(geo, mat);
   scene.add(line);
-  return line;
+  return { line, floorPts };
+}
+
+function pointAtProgress(path, progress) {
+  const a = Math.max(0, Math.min(path.length - 1, Math.floor(progress)));
+  const b = Math.min(path.length - 1, a + 1);
+  const t = Math.max(0, Math.min(1, progress - a));
+  const va = w2v(path[a].x, path[a].y, path[a].l);
+  const vb = w2v(path[b].x, path[b].y, path[b].l);
+  return va.lerp(vb, t);
+}
+
+function updateTrajectoryVisuals(progress) {
+  ['sgd','mom','adam'].forEach(key => {
+    const visual = pathVisuals[key];
+    if (!visual) return;
+
+    const clamped = Math.max(0, Math.min(STEPS, progress));
+    visual.tube.segments.forEach((segment, i) => {
+      const localProgress = Math.max(0, Math.min(1, clamped - i));
+      if (localProgress > 0 && segment.length > 1e-6) {
+        const visibleLength = segment.length * localProgress;
+        segmentPosition.copy(segment.start).addScaledVector(segment.dir, visibleLength * 0.5);
+        segmentScale.set(1, visibleLength, 1);
+        segmentMatrix.compose(segmentPosition, segment.quat, segmentScale);
+      } else {
+        segmentMatrix.makeScale(0, 0, 0);
+      }
+      visual.tube.mesh.setMatrixAt(i, segmentMatrix);
+    });
+    visual.tube.mesh.instanceMatrix.needsUpdate = true;
+
+    const wholeStep = Math.max(0, Math.min(Math.floor(clamped), visual.shadow.floorPts.length - 1));
+    const shadowProgress = clamped - wholeStep;
+    const shadowPositions = visual.shadow.line.geometry.attributes.position;
+    for (let i=0; i<=wholeStep; i++) {
+      const p = visual.shadow.floorPts[i];
+      shadowPositions.setXYZ(i, p.x, p.y, p.z);
+    }
+    let shadowCount = wholeStep + 1;
+    if (clamped > wholeStep && wholeStep < visual.shadow.floorPts.length - 1) {
+      shadowEnd.copy(visual.shadow.floorPts[wholeStep]).lerp(visual.shadow.floorPts[wholeStep+1], shadowProgress);
+      shadowPositions.setXYZ(wholeStep + 1, shadowEnd.x, shadowEnd.y, shadowEnd.z);
+      shadowCount++;
+    }
+    visual.shadow.line.geometry.setDrawRange(0, shadowCount);
+    shadowPositions.needsUpdate = true;
+
+    visual.head.position.copy(pointAtProgress(visual.path, clamped));
+  });
 }
 
 function redraw3D(activePaths, upTo) {
@@ -322,7 +446,8 @@ function redraw3D(activePaths, upTo) {
   const upto = (upTo === undefined) ? STEPS : upTo;
 
   // Small global minimum marker: identified in the header legend, not with a large floating label.
-  const mp = w2v(0, 0, loss(0,0));
+  const min = activeLandscape().min;
+  const mp = w2v(min.x, min.y, loss(min.x, min.y));
   markerObjs.push(makeSphere(mp, 0xff9f40, 0.075));
   markerObjs.push(makeBeacon(mp, 0xff9f40));
 
@@ -335,19 +460,17 @@ function redraw3D(activePaths, upTo) {
     if (!document.getElementById(togMap[key]).classList.contains('checked')) return;
     const path = activePaths[key];
     if (!path || path.length < 2) return;
-    const n = Math.min(upto, path.length-1);
     const threePts = [];
-    for (let i=0; i<=n; i++) threePts.push(w2v(path[i].x, path[i].y, path[i].l));
+    for (let i=0; i<path.length; i++) threePts.push(w2v(path[i].x, path[i].y, path[i].l));
 
-    // Bright 3D tube: WebGL ignores thick LineBasicMaterial linewidth in many browsers,
-    // so tubes make the trajectory visible from every camera angle.
-    const shadow = makeShadowLine(threePts, COLORS_NUM[key]);
-    const tube = makeTube(threePts, COLORS_NUM[key], TRACE_RADIUS[key], TRACE_OPACITY[key]);
-    const head = makeSphere(threePts[threePts.length - 1], COLORS_NUM[key], 0.115);
-    if (shadow) pathObjs[key].push(shadow);
-    if (tube) pathObjs[key].push(tube);
+    const tube = makeTubeInstances(threePts, COLORS_NUM[key], TRACE_RADIUS[key], TRACE_OPACITY[key]);
+    const shadow = makeShadowPath(threePts, COLORS_NUM[key]);
+    const head = makeSphere(threePts[0], COLORS_NUM[key], 0.115);
+    pathObjs[key].push(tube.mesh, shadow.line);
     pathObjs[key].push(head);
+    pathVisuals[key] = { tube, shadow, head, path };
   });
+  updateTrajectoryVisuals(upto);
 }
 
 
@@ -385,34 +508,73 @@ function draw2D(activePaths, upTo) {
     const path = activePaths[key];
     if (!path || path.length < 2) return;
     ctx2.beginPath();
-    for (let i=0; i<=Math.min(upto,path.length-1); i++) {
+    const wholeStep = Math.max(0, Math.min(Math.floor(upto), path.length-1));
+    for (let i=0; i<=wholeStep; i++) {
       const px=PAD.l+pW*(i/STEPS), py=PAD.t+pH*(1-Math.min(path[i].l,maxL)/maxL);
       i===0 ? ctx2.moveTo(px,py) : ctx2.lineTo(px,py);
+    }
+    if (upto > wholeStep && wholeStep < path.length-1) {
+      const t = upto - wholeStep;
+      const lossNow = path[wholeStep].l + (path[wholeStep+1].l - path[wholeStep].l) * t;
+      const px=PAD.l+pW*(upto/STEPS), py=PAD.t+pH*(1-Math.min(lossNow,maxL)/maxL);
+      ctx2.lineTo(px,py);
     }
     ctx2.strokeStyle=COLORS_HEX[key]; ctx2.lineWidth=1.5; ctx2.stroke();
   });
 }
 
 // ── Optimizer math ────────────────────────────────────────────────────────────
+function boundedMove(x, y, dx, dy) {
+  const stepLen = Math.hypot(dx, dy);
+  if (stepLen > MAX_OPTIMIZER_STEP) {
+    const scale = MAX_OPTIMIZER_STEP / stepLen;
+    dx *= scale;
+    dy *= scale;
+  }
+
+  const nextX = x - dx;
+  const nextY = y - dy;
+  const clampedX = Math.max(DOMAIN.xMin, Math.min(DOMAIN.xMax, nextX));
+  const clampedY = Math.max(DOMAIN.yMin, Math.min(DOMAIN.yMax, nextY));
+  return {
+    x: clampedX,
+    y: clampedY,
+    dx: x - clampedX,
+    dy: y - clampedY,
+    hitX: clampedX !== nextX,
+    hitY: clampedY !== nextY
+  };
+}
+
 function computePath(optimizer) {
-  const lr=getLR(), beta=getBeta();
+  const lr=getOptimizerLR(optimizer), beta=getBeta();
   let x=startPos.x, y=startPos.y, vx=0,vy=0, mx=0,my=0, vx2=0,vy2=0;
   const pts = [{x,y,l:clampL(loss(x,y))}];
   for (let i=0;i<STEPS;i++) {
     const gx=gradX(x,y), gy=gradY(x,y);
+    let dx=0, dy=0;
     if (optimizer==='sgd') {
-      x-=lr*gx; y-=lr*gy;
+      dx=lr*gx; dy=lr*gy;
     } else if (optimizer==='mom') {
-      vx=beta*vx+lr*gx; vy=beta*vy+lr*gy; x-=vx; y-=vy;
+      vx=beta*vx+lr*gx; vy=beta*vy+lr*gy;
+      dx=vx; dy=vy;
     } else {
       const ep=1e-8,b1=beta,b2=0.999;
       mx=b1*mx+(1-b1)*gx; my=b1*my+(1-b1)*gy;
       vx2=b2*vx2+(1-b2)*gx*gx; vy2=b2*vy2+(1-b2)*gy*gy;
       const mhx=mx/(1-Math.pow(b1,i+1)), mhy=my/(1-Math.pow(b1,i+1));
       const vhx=vx2/(1-Math.pow(b2,i+1)), vhy=vy2/(1-Math.pow(b2,i+1));
-      x-=lr*mhx/(Math.sqrt(vhx)+ep); y-=lr*mhy/(Math.sqrt(vhy)+ep);
+      dx=lr*mhx/(Math.sqrt(vhx)+ep);
+      dy=lr*mhy/(Math.sqrt(vhy)+ep);
     }
-    x=Math.max(-4.0,Math.min(4.0,x)); y=Math.max(-2.5,Math.min(2.5,y));
+    const next = boundedMove(x, y, dx, dy);
+    x = next.x; y = next.y;
+    if (optimizer === 'mom') {
+      vx = next.dx;
+      vy = next.dy;
+      if (next.hitX) vx = 0;
+      if (next.hitY) vy = 0;
+    }
     pts.push({x,y,l:clampL(loss(x,y))});
   }
   return pts;
@@ -420,12 +582,14 @@ function computePath(optimizer) {
 
 function getLR()   { return parseInt(document.getElementById('lrSlider').value)*0.01; }
 function getBeta() { return parseInt(document.getElementById('momSlider').value)*0.01; }
-// Returns {framesPerStep, stepsPerFrame}
-function getSpeedConfig() {
+function getOptimizerLR(optimizer) {
+  const scale = activeLandscape().lrScale?.[optimizer] || 1;
+  return getLR() * scale;
+}
+function getStepsPerSecond() {
   const v = parseInt(document.getElementById('speedSlider').value);
-  const cfg = {1:[8,1], 2:[4,1], 3:[2,1], 4:[1,1], 5:[1,1], 6:[1,2]};
-  const [fpS, spF] = cfg[v] || [1,1];
-  return { framesPerStep: fpS, stepsPerFrame: spF };
+  const cfg = {1:7.5, 2:15, 3:30, 4:60, 5:90, 6:120};
+  return cfg[v] || 60;
 }
 
 function updateLossReadouts(s) {
@@ -438,59 +602,78 @@ function updateLossReadouts(s) {
   });
 }
 
+function convergenceThreshold(path) {
+  if (!path || path.length === 0) return 0;
+  return Math.max(0.02, path[0].l * 0.03);
+}
+
+function convergenceStep(path) {
+  if (!path || path.length === 0) return -1;
+  const threshold = convergenceThreshold(path);
+  return path.findIndex(p => p.l <= threshold);
+}
+
 function getInsight(s, ap) {
   const tm={sgd:'togSGD',mom:'togMOM',adam:'togADAM'};
   const active=['sgd','mom','adam'].filter(k=>document.getElementById(tm[k]).classList.contains('checked')&&ap[k]);
-  if (!isRunning&&s===0) return 'Choose a <strong>start position</strong>, press <strong>Run</strong>. <strong>Drag the 3D surface</strong> to view from any angle.';
-  if (s<5) return 'Early steps — all optimizers follow the <strong>steepest descent</strong> direction. Watch how paths diverge.';
+  if (!isRunning&&s===0) return `Ready: <strong>${activeLandscape().label}</strong> from <strong>${startPos.label}</strong>.`;
+  if (s<5) return 'Early steps: paths follow the local gradient.';
   if (s<20) {
-    if (active.includes('mom')) return '<strong>Momentum</strong> accumulates velocity like a ball rolling downhill — building speed in consistent directions, dampening cross-valley oscillations.';
-    return 'Early convergence phase. Watch how each optimizer responds differently to the gradient.';
+    if (active.includes('mom')) return '<strong>Momentum</strong> builds velocity along consistent slopes.';
+    return 'Early phase: compare how each path bends.';
   }
   if (s<50) {
     if (active.includes('adam')&&active.includes('sgd')) {
       const al=ap.adam[s].l, sl=ap.sgd[s].l;
-      if (al<sl*0.6) return '<strong>Adam</strong> pulls ahead by adapting per-parameter learning rates — small updates in steep dimensions, large updates in flat ones.';
+      if (al<sl*0.6) return '<strong>Adam</strong> is adapting step sizes fastest here.';
     }
     if (active.includes('mom')&&active.includes('sgd')) {
       const ml=ap.mom[s].l, sl=ap.sgd[s].l;
-      if (ml<sl*0.7) return 'Momentum\'s <strong>velocity accumulation</strong> has built enough inertia to slide through flat regions that stall vanilla SGD.';
+      if (ml<sl*0.7) return '<strong>Momentum</strong> is carrying through flatter regions.';
     }
-    return 'Mid-run: compare the <strong>loss curves</strong> below. Steeper descent = faster convergence.';
+    return 'Mid-run: steeper loss curves mean faster descent.';
   }
-  if (s<90) return 'Notice any <strong>oscillation</strong> across the valley? That\'s the hallmark of β too high or learning rate too large. Try reducing β or α.';
+  const converged = active.map(k => ({ k, step: convergenceStep(ap[k]) })).filter(c => c.step >= 0 && c.step <= s);
+  if (converged.length === active.length && active.length > 0) {
+    return 'All visible optimizers have crossed the threshold.';
+  }
+  if (s<90) return 'Oscillation usually means α or β is too high.';
   const finals=active.map(k=>({k,l:ap[k][s].l})).sort((a,b)=>a.l-b.l);
   if (finals.length>0) {
     const w=finals[0];
-    return `<strong>${NAMES[w.k]}</strong> converged fastest (loss ${w.l.toFixed(4)}). Try a different start or adjust hyperparameters to shift rankings.`;
+    const fastest = active.map(k => ({ k, step: convergenceStep(ap[k]) })).filter(c => c.step >= 0).sort((a,b)=>a.step-b.step)[0];
+    if (fastest) {
+      return `<strong>${NAMES[fastest.k]}</strong> crossed threshold first. Best now: <strong>${NAMES[w.k]}</strong>.`;
+    }
+    return `<strong>${NAMES[w.k]}</strong> has the lowest current loss.`;
   }
-  return 'Run complete. Adjust hyperparameters and run again to compare.';
+  return 'Run complete. Adjust settings and compare again.';
 }
 
 // ── Sim loop ──────────────────────────────────────────────────────────────────
-function tick() {
-  const { framesPerStep, stepsPerFrame } = getSpeedConfig();
-  let advanced = false;
+function tick(now) {
+  if (!lastTickTime) lastTickTime = now;
+  const dt = Math.min(0.1, (now - lastTickTime) / 1000);
+  lastTickTime = now;
 
-  slowTick++;
-  if (slowTick >= framesPerStep) {
-    slowTick = 0;
-    step = Math.min(step + stepsPerFrame, STEPS);
-    advanced = true;
-  }
+  animProgress = Math.min(animProgress + dt * getStepsPerSecond(), STEPS);
+  step = Math.min(STEPS, Math.floor(animProgress));
+  updateTrajectoryVisuals(animProgress);
 
-  if (advanced) {
-    redraw3D(paths, step);
-    draw2D(paths, step);
+  if (step !== lastUiStep) {
+    lastUiStep = step;
+    draw2D(paths, animProgress);
     updateLossReadouts(step);
     document.getElementById('stepLabel').textContent = step;
     document.getElementById('stepCounter').textContent = `step ${step} / ${STEPS}`;
-    document.getElementById('progFill').style.width = (step/STEPS*100).toFixed(1)+'%';
+    document.getElementById('progFill').style.width = (animProgress/STEPS*100).toFixed(1)+'%';
     document.getElementById('insightBox').innerHTML = getInsight(step, paths);
   }
 
-  if (step >= STEPS) {
+  if (animProgress >= STEPS) {
+    step = STEPS;
     isRunning = false;
+    lastTickTime = 0;
     document.getElementById('runBtn').textContent = '↺  RUN AGAIN';
     document.getElementById('runBtn').classList.remove('running');
     document.getElementById('progFill').style.width = '100%';
@@ -508,7 +691,7 @@ function renderLoop() {
 // ── Reset ─────────────────────────────────────────────────────────────────────
 function resetAll() {
   if (animFrame) cancelAnimationFrame(animFrame);
-  isRunning=false; step=0; paths={}; slowTick=0;
+  isRunning=false; step=0; animProgress=0; paths={}; lastTickTime=0; lastUiStep=-1;
   document.getElementById('runBtn').textContent='▶  RUN';
   document.getElementById('runBtn').classList.remove('running');
   document.getElementById('stepLabel').textContent='0';
@@ -524,7 +707,7 @@ document.getElementById('resetBtn').addEventListener('click', resetAll);
 
 document.getElementById('runBtn').addEventListener('click', () => {
   if (isRunning) {
-    cancelAnimationFrame(animFrame); isRunning=false;
+    cancelAnimationFrame(animFrame); isRunning=false; lastTickTime=0;
     document.getElementById('runBtn').textContent='▶  RESUME';
     document.getElementById('runBtn').classList.remove('running');
     return;
@@ -535,32 +718,82 @@ document.getElementById('runBtn').addEventListener('click', () => {
     ['sgd','mom','adam'].forEach(k=>{
       if(document.getElementById(tm[k]).classList.contains('checked')) paths[k]=computePath(k);
     });
-    step=0; slowTick=0;
+    step=0; animProgress=0; lastUiStep=-1;
+    redraw3D(paths, animProgress);
   }
   isRunning=true;
+  lastTickTime=0;
   document.getElementById('runBtn').textContent='⏸  PAUSE';
   document.getElementById('runBtn').classList.add('running');
   animFrame=requestAnimationFrame(tick);
 });
 
-['A','B','C'].forEach(k=>{
-  document.getElementById('pre'+k).addEventListener('click',()=>{
-    document.querySelectorAll('.preset-btn').forEach(b=>b.classList.remove('active'));
-    document.getElementById('pre'+k).classList.add('active');
-    startPos={...PRESETS[k]}; resetAll();
-  });
-});
-
-document.getElementById('lrSlider').addEventListener('input',()=>{
+function updateSliderLabels() {
   document.getElementById('lrVal').textContent=getLR().toFixed(2);
-});
-document.getElementById('momSlider').addEventListener('input',()=>{
   document.getElementById('momVal').textContent=getBeta().toFixed(2);
-});
-document.getElementById('speedSlider').addEventListener('input',()=>{
   const v=parseInt(document.getElementById('speedSlider').value);
   const labels={1:'0.1×',2:'0.25×',3:'0.5×',4:'1×',5:'1.5×',6:'2×'};
   document.getElementById('speedVal').textContent=labels[v]||v+'×';
+}
+
+function applyLandscapeDefaults() {
+  const defaults = activeLandscape().defaults;
+  document.getElementById('lrSlider').value = defaults.lr;
+  document.getElementById('momSlider').value = defaults.beta;
+  updateSliderLabels();
+}
+
+function renderLandscapeControls() {
+  const select = document.getElementById('landscapeSelect');
+  select.innerHTML = '';
+  Object.entries(LANDSCAPES).forEach(([key, landscape]) => {
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = landscape.label;
+    select.appendChild(option);
+  });
+  select.value = activeLandscapeKey;
+}
+
+function renderPresetControls() {
+  const select = document.getElementById('presetSelect');
+  select.innerHTML = '';
+  Object.entries(activeLandscape().starts).forEach(([key, preset]) => {
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = preset.label;
+    select.appendChild(option);
+  });
+  select.value = startKey;
+}
+
+document.getElementById('landscapeSelect').addEventListener('change', e => {
+  activeLandscapeKey = e.target.value;
+  LOSS_MAX = activeLandscape().lossMax;
+  startKey = 'A';
+  startPos = {...activeLandscape().starts[startKey]};
+  applyLandscapeDefaults();
+  renderLandscapeControls();
+  renderPresetControls();
+  buildSurface();
+  resetAll();
+});
+
+document.getElementById('presetSelect').addEventListener('change', e => {
+  startKey = e.target.value;
+  startPos = {...activeLandscape().starts[startKey]};
+  renderPresetControls();
+  resetAll();
+});
+
+document.getElementById('lrSlider').addEventListener('input',()=>{
+  updateSliderLabels();
+});
+document.getElementById('momSlider').addEventListener('input',()=>{
+  updateSliderLabels();
+});
+document.getElementById('speedSlider').addEventListener('input',()=>{
+  updateSliderLabels();
 });
 
 ['togSGD','togMOM','togADAM'].forEach(id=>{
@@ -568,7 +801,11 @@ document.getElementById('speedSlider').addEventListener('input',()=>{
     e.preventDefault(); // prevent label from re-triggering the hidden checkbox
     const tog = document.getElementById(id);
     tog.classList.toggle('checked');
-    if (!isRunning&&step>0) { redraw3D(paths,step); draw2D(paths,step); }
+    if (Object.keys(paths).length) {
+      redraw3D(paths, animProgress);
+      draw2D(paths, animProgress);
+      updateLossReadouts(step);
+    }
   });
 });
 
@@ -580,9 +817,12 @@ function resizeAll() {
   draw2D(paths,step);
 }
 
-window.addEventListener('resize',()=>{ resizeAll(); redraw3D(paths,step); });
+window.addEventListener('resize',()=>{ resizeAll(); redraw3D(paths,animProgress); });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+renderLandscapeControls();
+renderPresetControls();
+applyLandscapeDefaults();
 applyOrbit();
 buildSurface();
 resizeAll();
