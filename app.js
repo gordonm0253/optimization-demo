@@ -1,14 +1,13 @@
 // ── Constants ────────────────────────────────────────────────────────────────
 const STEPS  = 320;
-const SURF_N = 72;
+const SURF_N = 84;
 const TUBE_RADIAL_SEGMENTS = 10;
 const COLORS_HEX = { sgd:'#ff4fd8', mom:'#00d4ff', adam:'#7cff4f' };
 const COLORS_NUM  = { sgd:0xff4fd8, mom:0x00d4ff, adam:0x7cff4f };
 const TRACE_RADIUS = { sgd:0.033, mom:0.041, adam:0.036 };
 const TRACE_OPACITY = { sgd:1.0, mom:1.0, adam:1.0 };
 const NAMES       = { sgd:'SGD', mom:'SGD + Momentum', adam:'Adam' };
-const DOMAIN = { xMin:-4.0, xMax:4.0, yMin:-2.5, yMax:2.5 };
-const MAX_OPTIMIZER_STEP = 0.22;
+const DOMAIN = { xMin:-7.5, xMax:7.5, yMin:-4.0, yMax:4.0 };
 
 // ── Loss landscapes ──────────────────────────────────────────────────────────
 function ravineY(x) { return 0.55 * Math.sin(1.25 * x); }
@@ -18,8 +17,7 @@ const LANDSCAPES = {
     label: 'Winding ravine',
     min: {x:0, y:0},
     lossMax: 42,
-    defaults: { lr:8, beta:90 },
-    lrScale: { sgd:1.0, mom:0.72, adam:1.45 },
+    defaults: { lr:6, beta:80 },
     starts: {
       A:{label:'Rocky ridge', x:3.65, y:1.75},
       B:{label:'Opposite ridge', x:-3.45, y:-1.55},
@@ -38,7 +36,6 @@ const LANDSCAPES = {
     min: {x:0, y:0},
     lossMax: 28,
     defaults: { lr:10, beta:85 },
-    lrScale: { sgd:1.0, mom:1.0, adam:1.2 },
     starts: {
       A:{label:'Wide side', x:3.5, y:1.9},
       B:{label:'Steep wall', x:-3.2, y:2.1},
@@ -55,7 +52,6 @@ const LANDSCAPES = {
     min: {x:0, y:0},
     lossMax: 34,
     defaults: { lr:6, beta:80 },
-    lrScale: { sgd:0.9, mom:0.85, adam:1.05 },
     starts: {
       A:{label:'Outer ring', x:3.55, y:-1.7},
       B:{label:'Side basin', x:-3.2, y:1.85},
@@ -111,7 +107,7 @@ dir2.position.set(-5, 2, -4); scene.add(dir2);
 // ── Manual orbit controls ─────────────────────────────────────────────────────
 let orbitTheta  = Math.PI / 4;
 let orbitPhi    = 0.55;
-let orbitRadius = 14;
+let orbitRadius = 20;
 let orbitTarget = new THREE.Vector3(0, 1.0, 0);
 let dragging = false, dragBtn = -1;
 let lastMouse = {x:0,y:0};
@@ -153,7 +149,7 @@ window.addEventListener('mousemove', e => {
 window.addEventListener('mouseup', () => { dragging = false; });
 cvs.addEventListener('wheel', e => {
   e.preventDefault();
-  orbitRadius = Math.max(2.5, Math.min(22, orbitRadius + e.deltaY * 0.012));
+  orbitRadius = Math.max(4, Math.min(36, orbitRadius + e.deltaY * 0.012));
   applyOrbit();
 }, { passive: false });
 cvs.addEventListener('contextmenu', e => e.preventDefault());
@@ -183,7 +179,7 @@ cvs.addEventListener('touchmove', e => {
     const dx = e.touches[0].clientX-e.touches[1].clientX;
     const dy = e.touches[0].clientY-e.touches[1].clientY;
     const d = Math.sqrt(dx*dx+dy*dy);
-    orbitRadius = Math.max(2.5, Math.min(22, orbitRadius*(lastTouchDist/d)));
+    orbitRadius = Math.max(4, Math.min(36, orbitRadius*(lastTouchDist/d)));
     lastTouchDist = d; applyOrbit();
   }
   e.preventDefault();
@@ -192,7 +188,7 @@ cvs.addEventListener('touchend', () => { dragging = false; });
 
 
 // Floor grid gives the path shadows a stable x/y reference.
-const grid = new THREE.GridHelper(8, 16, 0x33415f, 0x1f2937);
+const grid = new THREE.GridHelper(15, 30, 0x33415f, 0x1f2937);
 grid.position.y = 0;
 grid.material.transparent = true;
 grid.material.opacity = 0.22;
@@ -358,6 +354,60 @@ function makeBeacon(pos, color) {
   return group;
 }
 
+function makeStartMarker(pos) {
+  const group = new THREE.Group();
+
+  const diamondGeo = new THREE.OctahedronGeometry(0.16, 0);
+  const diamondMat = new THREE.MeshStandardMaterial({
+    color: 0xffdf6f,
+    emissive: 0xf0c060,
+    emissiveIntensity: 0.45,
+    roughness: 0.28,
+    metalness: 0.08
+  });
+  const diamond = new THREE.Mesh(diamondGeo, diamondMat);
+  diamond.position.copy(pos);
+  diamond.rotation.y = Math.PI / 4;
+  group.add(diamond);
+
+  const ringGeo = new THREE.TorusGeometry(0.20, 0.009, 8, 36);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffdf6f, transparent:true, opacity:0.76 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.set(pos.x, pos.y - 0.02, pos.z);
+  ring.rotation.x = Math.PI / 2;
+  group.add(ring);
+
+  scene.add(group);
+  return group;
+}
+
+function makeMinimumMarker(pos) {
+  const group = new THREE.Group();
+
+  const sphereGeo = new THREE.SphereGeometry(0.075, 24, 16);
+  const sphereMat = new THREE.MeshStandardMaterial({
+    color: 0xff7a1a,
+    emissive: 0xff7a1a,
+    emissiveIntensity: 0.55,
+    roughness: 0.32
+  });
+  const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+  sphere.position.copy(pos);
+  group.add(sphere);
+
+  [0.15, 0.25].forEach((radius, i) => {
+    const ringGeo = new THREE.TorusGeometry(radius, 0.008, 8, 44);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent:true, opacity:i === 0 ? 0.82 : 0.48 });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(pos.x, pos.y + 0.02, pos.z);
+    ring.rotation.x = Math.PI / 2;
+    group.add(ring);
+  });
+
+  scene.add(group);
+  return group;
+}
+
 function makeTubeInstances(points, color, radius=0.035, opacity=1.0) {
   const count = Math.max(0, points.length - 1);
   const geo = new THREE.CylinderGeometry(radius, radius, 1, TUBE_RADIAL_SEGMENTS, 1, false);
@@ -448,12 +498,12 @@ function redraw3D(activePaths, upTo) {
   // Small global minimum marker: identified in the header legend, not with a large floating label.
   const min = activeLandscape().min;
   const mp = w2v(min.x, min.y, loss(min.x, min.y));
-  markerObjs.push(makeSphere(mp, 0xff9f40, 0.075));
+  markerObjs.push(makeMinimumMarker(mp));
   markerObjs.push(makeBeacon(mp, 0xff9f40));
 
   // Start marker
   const sp2 = w2v(startPos.x, startPos.y, loss(startPos.x, startPos.y));
-  markerObjs.push(makeSphere(sp2, 0xf0c060, 0.14));
+  markerObjs.push(makeStartMarker(sp2));
 
   const togMap = {sgd:'togSGD', mom:'togMOM', adam:'togADAM'};
   ['sgd','mom','adam'].forEach(key => {
@@ -477,115 +527,168 @@ function redraw3D(activePaths, upTo) {
 // ── 2D Chart ─────────────────────────────────────────────────────────────────
 const c2d = document.getElementById('c2d');
 const ctx2 = c2d.getContext('2d');
+const CHART_PAD = {l:34, r:8, t:6, b:20};
+let chartHoverStep = null;
+
+function getVisibleOptimizers(activePaths) {
+  const togMap = {sgd:'togSGD', mom:'togMOM', adam:'togADAM'};
+  return ['sgd','mom','adam'].filter(k =>
+    document.getElementById(togMap[k]).classList.contains('checked') &&
+    activePaths[k] &&
+    activePaths[k].length > 1
+  );
+}
+
+function formatLossValue(value) {
+  if (!Number.isFinite(value)) return '∞';
+  if (Math.abs(value) >= 1000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) return value.toExponential(2);
+  if (Math.abs(value) >= 100) return value.toFixed(0);
+  if (Math.abs(value) >= 10) return value.toFixed(1);
+  return value.toFixed(4);
+}
+
+function niceChartMax(value) {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  const exponent = Math.floor(Math.log10(value));
+  const magnitude = Math.pow(10, exponent);
+  const scaled = value / magnitude;
+  const niceScaled = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+  return niceScaled * magnitude;
+}
 
 function draw2D(activePaths, upTo) {
   const W = c2d.width, H = c2d.height;
   ctx2.clearRect(0, 0, W, H);
-  const PAD = {l:34, r:8, t:6, b:20};
+  const PAD = CHART_PAD;
   const pW = W-PAD.l-PAD.r, pH = H-PAD.t-PAD.b;
   const upto = (upTo === undefined) ? STEPS : upTo;
   let maxL = 0.1;
-  const togMap = {sgd:'togSGD', mom:'togMOM', adam:'togADAM'};
-  ['sgd','mom','adam'].forEach(k => {
-    if (!document.getElementById(togMap[k]).classList.contains('checked')) return;
-    if (activePaths[k]) activePaths[k].slice(0,upto+1).forEach(p=>{if(p.l>maxL)maxL=p.l;});
+  const visibleOptimizers = getVisibleOptimizers(activePaths);
+  const wholeUpto = Math.max(0, Math.min(Math.floor(upto), STEPS));
+  visibleOptimizers.forEach(k => {
+    activePaths[k].slice(0, wholeUpto + 1).forEach(p=>{if(Number.isFinite(p.l)&&p.l>maxL)maxL=p.l;});
   });
+  const chartMax = niceChartMax(maxL);
 
   [0,.25,.5,.75,1].forEach(t => {
     const yy = PAD.t + pH*(1-t);
     ctx2.strokeStyle='rgba(255,255,255,0.05)'; ctx2.lineWidth=0.5;
     ctx2.beginPath(); ctx2.moveTo(PAD.l,yy); ctx2.lineTo(W-PAD.r,yy); ctx2.stroke();
     ctx2.fillStyle='rgba(255,255,255,0.22)'; ctx2.font='9px JetBrains Mono,monospace'; ctx2.textAlign='right';
-    ctx2.fillText((t*maxL).toFixed(1), PAD.l-4, yy+3);
+    ctx2.fillText(formatLossValue(t*chartMax), PAD.l-4, yy+3);
   });
 
   ctx2.textAlign='center'; ctx2.fillStyle='rgba(255,255,255,0.18)'; ctx2.font='9px JetBrains Mono,monospace';
   ctx2.fillText('steps', PAD.l+pW/2, H-2);
   [0,80,160,240,320].forEach(s => { const px=PAD.l+pW*(s/STEPS); ctx2.fillText(s,px,H-PAD.b+12); });
 
-  ['sgd','mom','adam'].forEach(key => {
-    if (!document.getElementById(togMap[key]).classList.contains('checked')) return;
+  visibleOptimizers.forEach(key => {
     const path = activePaths[key];
     if (!path || path.length < 2) return;
     ctx2.beginPath();
     const wholeStep = Math.max(0, Math.min(Math.floor(upto), path.length-1));
     for (let i=0; i<=wholeStep; i++) {
-      const px=PAD.l+pW*(i/STEPS), py=PAD.t+pH*(1-Math.min(path[i].l,maxL)/maxL);
+      const px=PAD.l+pW*(i/STEPS), py=PAD.t+pH*(1-Math.min(path[i].l,chartMax)/chartMax);
       i===0 ? ctx2.moveTo(px,py) : ctx2.lineTo(px,py);
     }
     if (upto > wholeStep && wholeStep < path.length-1) {
       const t = upto - wholeStep;
       const lossNow = path[wholeStep].l + (path[wholeStep+1].l - path[wholeStep].l) * t;
-      const px=PAD.l+pW*(upto/STEPS), py=PAD.t+pH*(1-Math.min(lossNow,maxL)/maxL);
+      const px=PAD.l+pW*(upto/STEPS), py=PAD.t+pH*(1-Math.min(lossNow,chartMax)/chartMax);
       ctx2.lineTo(px,py);
     }
     ctx2.strokeStyle=COLORS_HEX[key]; ctx2.lineWidth=1.5; ctx2.stroke();
   });
+
+  drawChartHover(activePaths, upto, chartMax, visibleOptimizers);
+}
+
+function drawChartHover(activePaths, upto, chartMax, visibleOptimizers) {
+  if (chartHoverStep === null || visibleOptimizers.length === 0) return;
+
+  const W = c2d.width, H = c2d.height;
+  const PAD = CHART_PAD;
+  const pW = W-PAD.l-PAD.r, pH = H-PAD.t-PAD.b;
+  const hoverStep = Math.max(0, Math.min(Math.floor(upto), chartHoverStep));
+  const x = PAD.l + pW*(hoverStep/STEPS);
+
+  ctx2.save();
+  ctx2.strokeStyle = 'rgba(255,255,255,0.32)';
+  ctx2.lineWidth = 1;
+  ctx2.beginPath();
+  ctx2.moveTo(x, PAD.t);
+  ctx2.lineTo(x, H-PAD.b);
+  ctx2.stroke();
+
+  const rows = visibleOptimizers.map(key => {
+    const point = activePaths[key][hoverStep];
+    const y = PAD.t+pH*(1-Math.min(point.l,chartMax)/chartMax);
+    return { key, loss: point.l, y };
+  });
+
+  rows.forEach(row => {
+    ctx2.fillStyle = COLORS_HEX[row.key];
+    ctx2.beginPath();
+    ctx2.arc(x, row.y, 3.2, 0, Math.PI * 2);
+    ctx2.fill();
+  });
+
+  const boxW = 172, rowH = 14, boxH = 20 + rows.length * rowH;
+  const boxX = Math.min(W - boxW - 6, Math.max(6, x + 10));
+  const boxY = Math.max(5, Math.min(H - boxH - 5, PAD.t + 2));
+
+  ctx2.fillStyle = 'rgba(13,15,20,0.92)';
+  ctx2.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx2.lineWidth = 1;
+  roundRect(ctx2, boxX, boxY, boxW, boxH, 6);
+  ctx2.fill();
+  ctx2.stroke();
+
+  ctx2.font = '9px JetBrains Mono,monospace';
+  ctx2.textAlign = 'left';
+  ctx2.fillStyle = 'rgba(255,255,255,0.72)';
+  ctx2.fillText(`step ${hoverStep}`, boxX + 8, boxY + 13);
+
+  rows.forEach((row, i) => {
+    const y = boxY + 28 + i * rowH;
+    ctx2.fillStyle = COLORS_HEX[row.key];
+    ctx2.fillRect(boxX + 8, y - 7, 7, 7);
+    ctx2.fillStyle = 'rgba(255,255,255,0.82)';
+    ctx2.fillText(`${NAMES[row.key]}: ${formatLossValue(row.loss)}`, boxX + 21, y);
+  });
+  ctx2.restore();
 }
 
 // ── Optimizer math ────────────────────────────────────────────────────────────
-function boundedMove(x, y, dx, dy) {
-  const stepLen = Math.hypot(dx, dy);
-  if (stepLen > MAX_OPTIMIZER_STEP) {
-    const scale = MAX_OPTIMIZER_STEP / stepLen;
-    dx *= scale;
-    dy *= scale;
-  }
-
-  const nextX = x - dx;
-  const nextY = y - dy;
-  const clampedX = Math.max(DOMAIN.xMin, Math.min(DOMAIN.xMax, nextX));
-  const clampedY = Math.max(DOMAIN.yMin, Math.min(DOMAIN.yMax, nextY));
-  return {
-    x: clampedX,
-    y: clampedY,
-    dx: x - clampedX,
-    dy: y - clampedY,
-    hitX: clampedX !== nextX,
-    hitY: clampedY !== nextY
-  };
-}
-
 function computePath(optimizer) {
-  const lr=getOptimizerLR(optimizer), beta=getBeta();
+  const lr=getLR(), beta=getBeta();
   let x=startPos.x, y=startPos.y, vx=0,vy=0, mx=0,my=0, vx2=0,vy2=0;
-  const pts = [{x,y,l:clampL(loss(x,y))}];
+  const pts = [{x,y,l:loss(x,y)}];
   for (let i=0;i<STEPS;i++) {
     const gx=gradX(x,y), gy=gradY(x,y);
-    let dx=0, dy=0;
     if (optimizer==='sgd') {
-      dx=lr*gx; dy=lr*gy;
+      x-=lr*gx; y-=lr*gy;
     } else if (optimizer==='mom') {
       vx=beta*vx+lr*gx; vy=beta*vy+lr*gy;
-      dx=vx; dy=vy;
-    } else {
+      x-=vx; y-=vy;
+    } else if (optimizer==='adam') {
       const ep=1e-8,b1=beta,b2=0.999;
       mx=b1*mx+(1-b1)*gx; my=b1*my+(1-b1)*gy;
       vx2=b2*vx2+(1-b2)*gx*gx; vy2=b2*vy2+(1-b2)*gy*gy;
       const mhx=mx/(1-Math.pow(b1,i+1)), mhy=my/(1-Math.pow(b1,i+1));
       const vhx=vx2/(1-Math.pow(b2,i+1)), vhy=vy2/(1-Math.pow(b2,i+1));
-      dx=lr*mhx/(Math.sqrt(vhx)+ep);
-      dy=lr*mhy/(Math.sqrt(vhy)+ep);
+      x-=lr*mhx/(Math.sqrt(vhx)+ep);
+      y-=lr*mhy/(Math.sqrt(vhy)+ep);
+    } else {
+      throw new Error(`Unknown optimizer: ${optimizer}`);
     }
-    const next = boundedMove(x, y, dx, dy);
-    x = next.x; y = next.y;
-    if (optimizer === 'mom') {
-      vx = next.dx;
-      vy = next.dy;
-      if (next.hitX) vx = 0;
-      if (next.hitY) vy = 0;
-    }
-    pts.push({x,y,l:clampL(loss(x,y))});
+    pts.push({x,y,l:loss(x,y)});
   }
   return pts;
 }
 
 function getLR()   { return parseInt(document.getElementById('lrSlider').value)*0.01; }
 function getBeta() { return parseInt(document.getElementById('momSlider').value)*0.01; }
-function getOptimizerLR(optimizer) {
-  const scale = activeLandscape().lrScale?.[optimizer] || 1;
-  return getLR() * scale;
-}
 function getStepsPerSecond() {
   const v = parseInt(document.getElementById('speedSlider').value);
   const cfg = {1:7.5, 2:15, 3:30, 4:60, 5:90, 6:120};
@@ -598,7 +701,7 @@ function updateLossReadouts(s) {
   ['sgd','mom','adam'].forEach(k => {
     const el=document.getElementById(km[k]);
     if (!document.getElementById(tm[k]).classList.contains('checked')||!paths[k]) { el.textContent='—'; return; }
-    el.textContent=paths[k][Math.min(s,STEPS)].l.toFixed(4);
+    el.textContent=formatLossValue(paths[k][Math.min(s,STEPS)].l);
   });
 }
 
@@ -807,6 +910,21 @@ document.getElementById('speedSlider').addEventListener('input',()=>{
       updateLossReadouts(step);
     }
   });
+});
+
+c2d.addEventListener('mousemove', e => {
+  const rect = c2d.getBoundingClientRect();
+  const scaleX = c2d.width / rect.width;
+  const x = (e.clientX - rect.left) * scaleX;
+  const PAD = CHART_PAD;
+  const pW = c2d.width - PAD.l - PAD.r;
+  chartHoverStep = Math.round(Math.max(0, Math.min(1, (x - PAD.l) / pW)) * STEPS);
+  draw2D(paths, animProgress || step);
+});
+
+c2d.addEventListener('mouseleave', () => {
+  chartHoverStep = null;
+  draw2D(paths, animProgress || step);
 });
 
 function resizeAll() {
